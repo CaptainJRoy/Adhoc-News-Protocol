@@ -19,9 +19,13 @@ import socket
 import sys
 import thread
 
+PROBE_TIME = 1
+DICT = []
+
+
 
 def sender_udp():
-    global MYGROUP_6
+    global MYGROUP_6, PROBE_TIME
     addrinfo = socket.getaddrinfo(MYGROUP_6, None)[0]
     s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
 
@@ -29,15 +33,17 @@ def sender_udp():
     ttl_bin = struct.pack('@i', MYTTL)
     s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
 
+    packet_no = 0
     while True:
-        data = repr(time.time())
-        s.sendto(data + '\0', (addrinfo[4][0], MYPORT))
-        time.sleep(1)
+        s.sendto(str(packet_no) + '\0', (addrinfo[4][0], MYPORT))
+        print('Sent: ' + str(packet_no))
+        packet_no += 1
+        time.sleep(PROBE_TIME)
 
 
 
 def sender_tcp():
-    global MYGROUP_6
+    global MYGROUP_6, PROBE_TIME
 
     #STREAM - TCP
     s = socket.socket(addrinfo[0], socket.SOCK_STREAM)
@@ -47,7 +53,7 @@ def sender_tcp():
     while True:
         data = repr(time.time())
         s.sendto(data + '\0', (addrinfo[4][0], MYPORT))
-        time.sleep(1)
+        time.sleep(PROBE_TIME)
 
 
 
@@ -73,9 +79,13 @@ def receiver():
     while True:
         data, sender = s.recvfrom(1500)
         while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
-        print ('Received: ' + str(sender) + '  ' + repr(data))
+        print ('Received: ' + str(sender) + ' -> ' + repr(data))
+
 
 
 if __name__ == '__main__':
-    t1 = thread.start_new_thread(sender_udp, ())
-    receiver()
+    try:
+        t1 = thread.start_new_thread(sender_udp, ())
+        receiver()
+    except KeyboardInterrupt:
+        print('Exiting!')

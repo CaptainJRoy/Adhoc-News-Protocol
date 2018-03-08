@@ -1,44 +1,32 @@
-#!/usr/bin/env python
-#
-# Send/receive UDP multicast packets.
-# Requires that your OS kernel supports IP multicast.
-#
-# Usage:
-#   mcast -s (sender, IPv4)
-#   mcast -s -6 (sender, IPv6)
-#   mcast    (receivers, IPv4)
-#   mcast  -6  (receivers, IPv6)
+import time, struct, thread, socket, sys
 
 MYPORT = 9999
 MYGROUP_6 = 'ff02::1'
-MYTTL = 1 # Increase to reach other networks
-
-import time
-import struct
-import socket
-import sys
-import thread
-
-PROBE_TIME = 1
-DICT = []
 
 
+class Hello:
+    def __init__(self, probing=10, group='ff02::1', ttl=1):
+        self.hello_int = probing
+        self.ipv6_group = group
+        self.hellomsg = {}
+        self.ttl = ttl
 
-def sender_udp():
-    global MYGROUP_6, PROBE_TIME
-    addrinfo = socket.getaddrinfo(MYGROUP_6, None)[0]
-    s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+    def run_probe(self):
+        thread.start_new_thread(self.run_sender, ())
+        thread.start_new_thread(self.run_listener, ())
 
-    # Set Time-to-live (optional)
-    ttl_bin = struct.pack('@i', MYTTL)
-    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+    def run_sender(self):
+        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+        ttl_bin = struct.pack('@i', self.ttl)
+        s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+        while True:
+            s.sendto(hellomsg + '\0', (addrinfo[4][0], MYPORT))
+            print('Sent HELLO to neighbours')
+            packet_no += 1
+            time.sleep(hello_int)
 
-    packet_no = 0
-    while True:
-        s.sendto(str(packet_no) + '\0', (addrinfo[4][0], MYPORT))
-        print('Sent: ' + str(packet_no))
-        packet_no += 1
-        time.sleep(PROBE_TIME)
+
 
 
 
@@ -56,10 +44,10 @@ def sender_tcp():
         time.sleep(PROBE_TIME)
 
 
-
 def receiver():
     global MYGROUP_6
     addrinfo = socket.getaddrinfo(MYGROUP_6, None)[0]
+    print addrinfo+"\n"
     s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
 
     # Allow multiple copies of this program on one machine

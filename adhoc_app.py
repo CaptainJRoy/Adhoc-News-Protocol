@@ -1,19 +1,32 @@
-import time, struct, thread, socket, sys
+import time, struct, thread, socket, sys, json, random
 
-MYPORT = 9999
-MYGROUP_6 = 'ff02::1'
+
+"""
+O dicionario HELLO guarda a lista dos IPs dos vizinhos e o timestamp do ultimo refresh
+Uma funcao tem que varrer a estrutura HELLO e remover os IPs mais antigos que dead_interval
+A funcao que recebe os HELLOs via UDP adiciona os novos IPs na estrutura HELLO
+"""
+
+
+# s=json.dumps(variables)
+# variables2=json.loads(s)
+
+for i in dict_:
 
 
 class Hello:
-    def __init__(self, probing=10, group='ff02::1', ttl=1):
-        self.hello_int = probing
+    def __init__(self, probing=10, group='ff02::1', ttl=1, deadint=600, port=9999):
+        self.hello_int = probing+random.randint(0, probing*0.1)
+        self.dead_interval  = deadint
         self.ipv6_group = group
         self.hellomsg = {}
         self.ttl = ttl
+        self.port = port
 
     def run_probe(self):
         thread.start_new_thread(self.run_sender, ())
         thread.start_new_thread(self.run_listener, ())
+        thread.start_new_thread(self.run_removedead, ())
 
     def run_sender(self):
         addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
@@ -21,13 +34,29 @@ class Hello:
         ttl_bin = struct.pack('@i', self.ttl)
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
-            s.sendto(hellomsg + '\0', (addrinfo[4][0], MYPORT))
-            print('Sent HELLO to neighbours')
-            packet_no += 1
-            time.sleep(hello_int)
+            s.sendto(self.hellomsg + '\0', (addrinfo[4][0], self.port))
+            print('Hello sent!\n')
+            time.sleep(self.hello_int)
 
+    def run_listener(self):
+        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('', self.port))
+        group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
 
+        mreq = group_bin + struct.pack('@I', 0)
+        s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
+        # Loop, printing any data we receive
+        while True:
+            data, sender = s.recvfrom(1500)
+            while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
+            print ('Received: ' + (str(sender).rsplit('%', 1)[0])[2:] + ' -> ' + repr(data))
+
+    def run_removedead(self):
+        for ip in self.hellomsg:
+            print 'IP: 'ip, 'timestamp: ', self.hellomsg[ip];
 
 
 def sender_tcp():
@@ -40,40 +69,15 @@ def sender_tcp():
     s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
     while True:
         data = repr(time.time())
-        s.sendto(data + '\0', (addrinfo[4][0], MYPORT))
+        s.sendto(data + '\0', (addrinfo[4][0], self.port))
         time.sleep(PROBE_TIME)
 
-
-def receiver():
-    global MYGROUP_6
-    addrinfo = socket.getaddrinfo(MYGROUP_6, None)[0]
-    print addrinfo+"\n"
-    s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-
-    # Allow multiple copies of this program on one machine
-    # (not strictly needed)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    # Bind it to the port
-    s.bind(('', MYPORT))
-
-    group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
-    # Join MYGROUP_6
-
-    mreq = group_bin + struct.pack('@I', 0)
-    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
-
-    # Loop, printing any data we receive
-    while True:
-        data, sender = s.recvfrom(1500)
-        while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
-        print ('Received: ' + str(sender) + ' -> ' + repr(data))
 
 
 
 if __name__ == '__main__':
     try:
-        t1 = thread.start_new_thread(sender_udp, ())
-        receiver()
+        prob = Hello()
+        prob.run_probe()
     except KeyboardInterrupt:
         print('Exiting!')

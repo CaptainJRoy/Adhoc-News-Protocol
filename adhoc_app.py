@@ -3,6 +3,9 @@ import time, struct, thread, socket, sys, json, random
 
 """
 O dicionario HELLO guarda a lista dos IPs dos vizinhos e o timestamp do ultimo refresh
+Cada nó receberá HELLOS de seus vizinhos, que por sua vez terá a lista dos vizinhos dos vizinhos.
+A tabela terá portanto dois níveis.
+Caso seja necessário enviar algo para alguem fora da lista,  nó terá que enviar um route_request para os vizinhos e receber um route_reply com a devida rota.
 Uma funcao tem que varrer a estrutura HELLO e remover os IPs mais antigos que dead_interval
 A funcao que recebe os HELLOs via UDP adiciona os novos IPs na estrutura HELLO
 """

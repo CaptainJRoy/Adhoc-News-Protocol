@@ -27,8 +27,8 @@ class Hello:
         self.hello_int = probing+random.randint(0, probing*0.1)
         self.dead_interval  = deadint
         self.ipv6_group = group
-        self.hello = {}
-        self.tabela = {}
+        self.hello = ['A1']
+        self.table = {}
         self.port = port
 
     """
@@ -50,20 +50,37 @@ class Hello:
         atraves de UDP (socket.SOCK_DGRAM), com apenas TTL=1 (ttl_bin)
     """
     def run_sender(self):
+        time.sleep(0.1)
         addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
         s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
-            #s.sendto((time.time().encode(),json.dumps(self.hello) + '\0').encode()), (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
+            bytes_to_send = json.dumps([int(time.time()), self.hello]).encode()
+            s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             #bytes_to_send = str(int(time.time())).encode()+";".encode()+(str(self.hello) + '\0').encode()
-            bytes_to_send = (str(int(time.time()))+", "+(str(self.hello) + '\0')).encode()
-            print("Sent: "+bytes_to_send.decode())
-            s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
+            #bytes_to_send = (str(int(time.time()))+", "+(str(self.hello) + '\0')).encode()
+            #print("Sent: "+bytes_to_send.decode())
+            #s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
             time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
 
+    def updateTable(self, sender, vizinho, timeStamp, rtt):
+        found = False;
+        for key in self.table:
+            if(key==vizinho):
+                found = True;
+                if(self.table.get(key)[2]>rtt and self.table.get(key)[0] != sender):
+                    self.table.get(key)[1] = timeStamp
+                    self.table.get(key)[0] = sender
+                    self.table.get(key)[2] = rtt
+                    break;
+                elif(self.table.get(key)[0] == sender):
+                    self.table.get(key)[1] = timeStamp
+                    self.table.get(key)[2] = rtt
+        if(found==False):
+            self.table[vizinho] = [sender, timeStamp, rtt]
 
     def run_listener(self):
         global ROUTING_TABLE
@@ -79,23 +96,23 @@ class Hello:
         while True:
             data, sender = s.recvfrom(1500)
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
-            timerec, array = data.decode().split(",")
+            array = json.loads(data.decode())
+            timeStamp = array[0]
+            rtt = int(time.time())-timeStamp
+            vizinhos = array[1]
             ipViz = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-            print ("Recebido de "+ ipViz + ' -> ' + array + " com roundtrip de: " + str(int(time.time())-int(timerec)))
-            self.hello[ipViz] = int(time.time())
-            #tabRecebida = json.loads(data.decode())
-            #value = []
-            #value[0]=ipViz
-            #value[1]=datetime.datetime.now();
-            #self.hello[ipViz] = time.time(); #UNIX TIME!
-
+            print ("Recebido de "+ ipViz + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
+            for ip in vizinhos:
+                self.updateTable(ipViz, ip, timeStamp, rtt)
+                print(self.table)
 
     def run_removedead(self):
         while True:
-            for ip in self.hello:
-                if((int(time.time())-self.hello[ip])>10):
+            time.sleep(10)
+            #for ip in self.hello:
+                #if((int(time.time())-self.hello[ip])>10):
                     #del self.hello[ip]
-                    print('IP: ', ip, 'timestamp: ', self.hello[ip])
+                    #print('IP: ', ip, 'timestamp: ', self.hello[ip])
                 #remove se datetime.datetime.now() - self.hello[ip] > 2*self.hello_int
 
 
@@ -111,6 +128,8 @@ def sender_tcp():
         data = repr(time.time())
         s.sendto(data + '\0', (addrinfo[4][0], self.port))
         time.sleep(PROBE_TIME)
+
+
 
 
 if __name__ == '__main__':

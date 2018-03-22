@@ -27,7 +27,7 @@ class Hello:
         self.hello_int = probing+random.randint(0, probing*0.1)
         self.dead_interval  = deadint
         self.ipv6_group = group
-        self.hello = []
+        self.hello = {}
         self.tabela = {}
         self.port = port
 
@@ -56,11 +56,12 @@ class Hello:
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
             #s.sendto((time.time().encode(),json.dumps(self.hello) + '\0').encode()), (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
-            bytes_to_send = (str(self.hello) + '\0').encode()
+            #bytes_to_send = str(int(time.time())).encode()+";".encode()+(str(self.hello) + '\0').encode()
+            bytes_to_send = (str(int(time.time()))+", "+(str(self.hello) + '\0')).encode()
             print(bytes_to_send.decode())
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
-                                        math.floor(self.hello_int * 0.1))
+                                         math.floor(self.hello_int * 0.1))
             time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
 
 
@@ -76,10 +77,12 @@ class Hello:
 
         # Loop, printing any data we receive
         while True:
-            (time, array), sender = s.recvfrom(1500)
-            while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
+            data, sender = s.recvfrom(1500)
+            #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
+            timerec, array = data.decode().split(",")
             ipViz = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-            print ("Recebido " + ipViz + '->' + data.decode())
+            print ("Recebido de "+ ipViz + ' -> ' + array + " com roundtrip de: " + str(int(time.time())-int(timerec)))
+            self.hello[ipViz] = int(time.time())
             #tabRecebida = json.loads(data.decode())
             #value = []
             #value[0]=ipViz
@@ -90,7 +93,9 @@ class Hello:
     def run_removedead(self):
         while True:
             for ip in self.hello:
-                print('IP: ', ip, 'timestamp: ', self.hello[ip])
+                if((self.hello[ip]-int(time.time()))>1000):
+
+                    print('IP: ', ip, 'timestamp: ', self.hello[ip])
                 #remove se datetime.datetime.now() - self.hello[ip] > 2*self.hello_int
 
 

@@ -55,7 +55,7 @@ class Hello:
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
-            #s.sendto(( + json.dumps(self.hello) + '\0').encode(), (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
+            #s.sendto((time.time().encode(),json.dumps(self.hello) + '\0').encode()), (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             bytes_to_send = (str(self.hello) + '\0').encode()
             print(bytes_to_send.decode())
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
@@ -76,7 +76,7 @@ class Hello:
 
         # Loop, printing any data we receive
         while True:
-            data, sender = s.recvfrom(1500)
+            (time, array), sender = s.recvfrom(1500)
             while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
             ipViz = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
             print ("Recebido " + ipViz + '->' + data.decode())
@@ -121,4 +121,4 @@ if __name__ == '__main__':
         print('Exiting')
 
 #Por a enviar o array hello, com os vizinhos diretos, enviar um timestamp no inicio do pacote hello
-#Guardar o rtt na tabela de reencaminhamento
+#Guardar o rtt na tabela de reencaminhamento, timestamp, e ips

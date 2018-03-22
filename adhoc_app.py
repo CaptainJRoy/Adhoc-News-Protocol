@@ -58,7 +58,7 @@ class Hello:
             #s.sendto((time.time().encode(),json.dumps(self.hello) + '\0').encode()), (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             #bytes_to_send = str(int(time.time())).encode()+";".encode()+(str(self.hello) + '\0').encode()
             bytes_to_send = (str(int(time.time()))+", "+(str(self.hello) + '\0')).encode()
-            print(bytes_to_send.decode())
+            print("Sent: "+bytes_to_send.decode())
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
@@ -93,13 +93,10 @@ class Hello:
     def run_removedead(self):
         while True:
             for ip in self.hello:
-                if((self.hello[ip]-int(time.time()))>1000):
-
+                if((int(time.time())-self.hello[ip])>10):
+                    #del self.hello[ip]
                     print('IP: ', ip, 'timestamp: ', self.hello[ip])
                 #remove se datetime.datetime.now() - self.hello[ip] > 2*self.hello_int
-
-
-
 
 
 def sender_tcp():
@@ -114,8 +111,6 @@ def sender_tcp():
         data = repr(time.time())
         s.sendto(data + '\0', (addrinfo[4][0], self.port))
         time.sleep(PROBE_TIME)
-
-
 
 
 if __name__ == '__main__':

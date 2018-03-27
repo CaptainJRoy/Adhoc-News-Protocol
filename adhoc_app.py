@@ -1,5 +1,5 @@
 import time, struct, socket, sys, json
-import _thread, math, random, datetime
+import _thread, math, random, datetime, subprocess
 """
 Dicionario hello guarda a lista dos IPs dos vizinhos e o timestamp do ultimo refresh
 Cada no recebera hellos de seus vizinhos, que por sua vez tera a lista dos vizinhos dos vizinhos.
@@ -30,6 +30,7 @@ class Hello:
         self.hello = ['A1']
         self.table = {}
         self.port = port
+        self.address = subprocess.check_output(["ifconfig"]).decode().rsplit('\n')[3].rsplit('inet6 addr: ')[1].rsplit('/')[0]
 
     """
         Corre as threads que enviam mensagens hello, contendo o seu dicionario,
@@ -55,13 +56,11 @@ class Hello:
         s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+        adress = socket.getaddrinfo(self.ipv6_group , self.port, socket.AF_INET6)
         while True:
+            self.hello[0] = (str((addrinfo[4][0], self.port)).rsplit('%', 1)[0])[2:]
             bytes_to_send = json.dumps([int(time.time()), self.hello]).encode()
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
-            #bytes_to_send = str(int(time.time())).encode()+";".encode()+(str(self.hello) + '\0').encode()
-            #bytes_to_send = (str(int(time.time()))+", "+(str(self.hello) + '\0')).encode()
-            #print("Sent: "+bytes_to_send.decode())
-            #s.sendto(bytes_to_send, (addrinfo[4][0], self.port))
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
             time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
@@ -102,9 +101,11 @@ class Hello:
             vizinhos = array[1]
             ipViz = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
             print ("Recebido de "+ ipViz + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
-            for ip in vizinhos:
-                self.updateTable(ipViz, ip, timeStamp, rtt)
-                print(self.table)
+            if ipViz != self.address:
+                if ipViz != addrinfo[0]:
+                    for ip in vizinhos:
+                        self.updateTable(ipViz, ip, timeStamp, rtt)
+                        print(self.table)
 
     def run_removedead(self):
         while True:

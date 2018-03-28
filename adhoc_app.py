@@ -21,17 +21,17 @@ class Hello:
             @self.hello_int - intervalo de tempo entre envio de pacotes hello
             @self.dead_interval - intervalo de tempo ate considerar um no desconectado
             @self.ipv6_group - grupo ipv6 do equipamento que executa o programa
-            @self.hello - dicionario de vizinhos
+            @self.hello - dicionario de vizinhos, sendo a key o seu nome, contendo o ip e o rtt desde o nodo até ao vizinho como value
             @self.port - porta para comunicar o protocolo hello
+            @self.name - nome do nodo
         """
         self.hello_int = probing+random.randint(0, probing*0.1)
         self.dead_interval  = deadint
         self.ipv6_group = group
-        self.hello = ['A1']
+        self.hello = {}
         self.table = {}
         self.port = port
-        self.address = subprocess.check_output(["ifconfig"]).decode().rsplit('\n')[3].rsplit('inet6 addr: ')[1].rsplit('/')[0]
-
+        self.name = sys.argv[1]
     """
         Corre as threads que enviam mensagens hello, contendo o seu dicionario,
         que escutam por mensagens hello, que contem o dicionario dos vizinhos,
@@ -51,6 +51,7 @@ class Hello:
         atraves de UDP (socket.SOCK_DGRAM), com apenas TTL=1 (ttl_bin)
     """
     def run_sender(self):
+        #Retirar isto
         time.sleep(0.1)
         addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
         s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
@@ -58,28 +59,41 @@ class Hello:
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         adress = socket.getaddrinfo(self.ipv6_group , self.port, socket.AF_INET6)
         while True:
-            self.hello[0] = (str((addrinfo[4][0], self.port)).rsplit('%', 1)[0])[2:]
-            bytes_to_send = json.dumps([int(time.time()), self.hello]).encode()
+            self.hello = {}
+            for nameViz in self.table:
+                if nameViz == self.table[nameViz][0]:
+                    array = []
+                    array.append(self.table[nameViz][1])
+                    array.append(self.table[nameViz][4])
+                    self.hello[nameViz] = array
+
+            bytes_to_send = json.dumps([int(time.time()), self.name, self.hello]).encode()
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
             time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
 
-    def updateTable(self, sender, vizinho, timeStamp, rtt):
-        found = False;
-        for key in self.table:
-            if(key==vizinho):
-                found = True;
-                if(self.table.get(key)[2]>rtt and self.table.get(key)[0] != sender):
-                    self.table.get(key)[1] = timeStamp
-                    self.table.get(key)[0] = sender
-                    self.table.get(key)[2] = rtt
-                    break;
-                elif(self.table.get(key)[0] == sender):
-                    self.table.get(key)[1] = timeStamp
-                    self.table.get(key)[2] = rtt
-        if(found==False):
-            self.table[vizinho] = [sender, timeStamp, rtt]
+    """
+        Atualiza a self.table com as informações do vizinho em questão, atualizando o valor na tabela caso:
+        1. O nome do vizinho que enviou for igual, atualizando as informações, caso a rede tenha mudado
+        2. O rtt for menor
+        3. Não exista registo na tabela desse vizinho
+        @senderName - Nome do vizinho que enviou o hello
+        @senderIP - IP do vizinho que envou o hello
+        @vizName - Nome de um dos vizinhos contidos no hello
+        @vizInfo - Array que contêm o ip do vizinho contido no hello, e o rtt da ligação
+        @timeStamp - Tempo de quando recebeu o pacote hello
+        @rtt - RTT desde este nodo até ao vizinho que enviou o hello
+    """
+    def updateTable(self, senderName, senderIP, vizName, vizInfo, timeStamp, rtt):
+        if vizName in self.table:
+            data = self.table[vizName]
+            if(data[0] == senderName or data[4] > (rtt+vizInfo[1]) or (timeStamp - data[3] < 20000)):
+                self.table[vizName] = [senderName, senderIP, vizInfo[0], timeStamp, rtt+int(vizInfo[1])]
+        else:
+            self.table[vizName] = [senderName, senderIP, vizInfo[0], timeStamp, rtt+int(vizInfo[1])]
+
+
 
     def run_listener(self):
         global ROUTING_TABLE
@@ -98,14 +112,16 @@ class Hello:
             array = json.loads(data.decode())
             timeStamp = array[0]
             rtt = int(time.time())-timeStamp
-            vizinhos = array[1]
-            ipViz = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-            print ("Recebido de "+ ipViz + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
-            if ipViz != self.address:
-                if ipViz != addrinfo[0]:
-                    for ip in vizinhos:
-                        self.updateTable(ipViz, ip, timeStamp, rtt)
-                        print(self.table)
+            senderName = array[1]
+            vizinhos = array[2]
+            senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
+            print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
+            if senderName != self.name:
+                self.updateTable(senderName, senderIP, senderName, [senderIP, 0], timeStamp, rtt)
+                for vizName in vizinhos:
+                    if vizName != self.name:
+                        self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
+                print(self.table)
 
     def run_removedead(self):
         while True:

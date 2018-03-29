@@ -52,6 +52,7 @@ class Hello:
 
 
 
+
     """
         Pacote enviado para informar o caminho até ao nodo pretendido, verificando inicialmente se o nodo que
         originou o ROUTE REQUEST já não está à espera da resposta, devido a timeout.
@@ -109,13 +110,25 @@ class Hello:
     def recv_input(self):
         try:
             while True:
-                inp = input()
-                array = inp.split()
-                if array[0] == "ROUTE" and array[1] == "REQUEST":
-                    if(array[2] not in self.table):
-                        self.route_request(int(time.time()), array[2], int(array[3]), [], int(array[4]))
+                inp = input(self.name+ "#>")
+                command = inp.split()
+                if command[0] == 'route' and command[1] == 'request':
+                    if(command[2] not in self.table):
+                        self.route_request(int(time.time()), command[2], int(command[3]), [], int(command[4]))
                     else:
                         print(self.table)
+                elif command[0] == 'help':
+                    self.printhelp()
+                elif len(command)==1 and command[0] == 'route':
+                    print("Current routing table:")
+                    print("Node Name    | IPV6 address          | Next hop              | Next hop RTT    | Timestamp     | RTT")
+                    print(self.table)
+                elif len(command)==1 and command[0] == 'hello':
+                    print("Current hello table:")
+                    print(self.hello)
+                else:
+                    print("Invalid command!")
+                    
 
 
         except EOFError:
@@ -250,6 +263,20 @@ class Hello:
                     #del self.hello[ip]
                     #print('IP: ', ip, 'timestamp: ', self.hello[ip])
                 #remove se datetime.datetime.now() - self.hello[ip] > 2*self.hello_int
+    
+
+
+
+    def printhelp(self):
+        print()
+        print("AER TP1 - Adhoc Route 0.1")
+        print()
+        print("Following commands are available:")
+        print("route - prints the current routing table")
+        print("route request [computer_name] - request the route to computer")
+        print("hello - prints the current hello table")
+        print("ping [computer_name] - sends a small package to teste the routing table")
+        print()
 
 
 def sender_tcp():

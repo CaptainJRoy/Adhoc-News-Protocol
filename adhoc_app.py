@@ -117,6 +117,7 @@ class Hello:
                     else:
                         print(self.table)
 
+
         except EOFError:
             pass
 
@@ -124,22 +125,35 @@ class Hello:
         Thread que envia a mensagem hello, enviando o seu dicionario, contendo
         os seus vizinhos diretos, enviando para o grupo IPv6 (self.ipv6_group)
         atraves de UDP (socket.SOCK_DGRAM), com apenas TTL=1 (ttl_bin)
+        Caso o tamanho do pacote UDP seja maior 65500, divide-se o número de itens no dicionário
+        até meio, até que o pacote seja menor que 65500
     """
     def run_sender(self, s, addrinfo):
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-        #_thread.start_new_thread(self.recv_input, s, addrinfo[4][0])
+        limit = 65500
+        n = 0
         while True:
             self.hello = {}
             for nameViz in self.table:
                 if nameViz == self.table[nameViz][0]:
-                    self.hello[nameViz] = self.table[nameViz][3]
-            #primeiro valor a 0 significa que é um Hello
+                    if(n<=limit):
+                        self.hello[nameViz] = self.table[nameViz][3]
+                    else:
+                        bytes_to_send = json.dumps([0, int(time.time()), self.name, self.hello]).encode()
+                        self.hello = {}
+                        n = 0
             bytes_to_send = json.dumps([0, int(time.time()), self.name, self.hello]).encode()
-            s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
-            time_add = random.randrange(-math.floor(self.hello_int * 0.1),
+            if(len((bytes_to_send, (addrinfo[4][0], self.port)))<= 65500):
+                s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
+                time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
-            time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
+                time.sleep(self.hello_int + time_add)  #tempo de probe entre hello_int +- variaçao tempo
+                limit = 65500
+                n = 0
+            else:
+                limit = limit/2
+                n=0
 
     """
         Atualiza a self.table com as informações do vizinho em questão, atualizando o valor na tabela caso:
@@ -187,7 +201,7 @@ class Hello:
 
         # Loop, printing any data we receive
         while True:
-            data, sender = s.recvfrom(1500)
+            data, sender = s.recvfrom(65535)
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
             array = json.loads(data.decode())
             tipo = array[0]
@@ -203,6 +217,7 @@ class Hello:
                     for vizName in vizinhos:
                         if vizName != self.name:
                             self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
+                    print(self.table)
             if tipo == 1:
                 path = array[4]
                 if self.name not in path:
@@ -225,10 +240,6 @@ class Hello:
                     self.route_reply(stamp, nameSend, path, nameNode, timeout)
                 else:
                     print(self.table)
-
-
-
-
 
 
     def run_removedead(self):

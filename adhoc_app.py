@@ -122,7 +122,7 @@ class Hello:
                         self.printhelp()
                     elif len(command)==1 and command[0] == 'route':
                         print("Current routing table:")
-                        print("Node Name    | IPV6 address          | Next hop              | Next hop RTT    | Timestamp     | RTT")
+                        print("Node Name |  Next hop    | IPV6 address  | Next hop RTT | Timestamp  | RTT")
                         print(self.table)
                     elif len(command)==1 and command[0] == 'hello':
                         print("Current hello table:")
@@ -184,9 +184,14 @@ class Hello:
     def updateTable(self, senderName, senderIP, vizName, vizRTT, timeStamp, rtt):
         if vizName in self.table:
             data = self.table[vizName]
-            if(data[0] == senderName or data[4] >= (rtt+vizRTT) or (timeStamp - data[3] < 20000)):
+            #print ("DBG1")
+            #print(data)
+            #if(data[0] == senderName or data[3] >= (rtt+vizRTT) or (timeStamp - data[2] < 20000)):
+            if(data[0] == senderName or data[3] >= (rtt+vizRTT)):
+                #print ("DBG2")
                 self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
         else:
+            #print ("DBG3")
             self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
 
 
@@ -219,19 +224,29 @@ class Hello:
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
             array = json.loads(data.decode())
             tipo = array[0]
+            
             if tipo == 0:
                 timeStamp = array[1]
                 rtt = int(time.time())-timeStamp
                 senderName = array[2]
                 vizinhos = array[3]
+                
                 senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
+                
                 #print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
                 if senderName != self.name:
                     self.updateTable(senderName, senderIP, senderName, 0, timeStamp, rtt)
                     for vizName in vizinhos:
+                        
+                        #print(str(dest[0]))
                         if vizName != self.name:
-                            self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
-                    print(self.table)
+                            try:
+                                destino=self.table[vizName]
+                                if vizName!=destino[0]:
+                                    self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
+                                
+                            except:
+                                self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
             if tipo == 1:
                 path = array[4]
                 if self.name not in path:
@@ -252,20 +267,18 @@ class Hello:
                     nameSend = path.pop()
                     path.append(self.name)
                     self.route_reply(stamp, nameSend, path, nameNode, timeout)
-                else:
-                    print(self.table)
+                #else:
+                    #print(self.table)
 
 
     def run_removedead(self):
         while True:
             time.sleep(10)
-            #for ip in self.hello:
-                #if((int(time.time())-self.hello[ip])>10):
-                    #del self.hello[ip]
-                    #print('IP: ', ip, 'timestamp: ', self.hello[ip])
-                #remove se datetime.datetime.now() - self.hello[ip] > 2*self.hello_int
-    
-
+            for dest in self.table:
+                table=self.table[dest]
+                if((int(time.time())-table[2])>60):
+                    del self.table[dest]
+                    break               
 
 
     def printhelp(self):

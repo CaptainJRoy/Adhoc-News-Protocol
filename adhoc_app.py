@@ -113,7 +113,7 @@ class Hello:
                 inp = input(self.name+ "#>")
                 command = inp.split()
                 if len(command) > 0:
-                    if command[0] == 'route' and command[1] == 'request':
+                    if len(command)>1 and command[0] == 'route' and command[1] == 'request':
                         if(command[2] not in self.table):
                             self.route_request(int(time.time()), command[2], int(command[3]), [], int(command[4]))
                         else:

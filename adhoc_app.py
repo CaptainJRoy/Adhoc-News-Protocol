@@ -33,26 +33,31 @@ class Hello:
         self.port = port
         self.name = sys.argv[1]
     """
-        Corre as threads que enviam mensagens hello, contendo o seu dicionario,
-        que escutam por mensagens hello, que contem o dicionario dos vizinhos,
+        Corre as threads que enviam mensagens de protocolo hello,
+        que escutam por mensagens UDP,, e que escutam por input do utilizador,
         que removem os vizinhos que ja nao respondem
     """
     def run_probe(self):
         try:
-            _thread.start_new_thread(self.udp, ())
+            addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+            sender = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+            listener = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+            _thread.start_new_thread(self.run_sender, (sender,addrinfo,))
+            _thread.start_new_thread(self.run_listener, (listener,addrinfo,))
+            _thread.start_new_thread(self.recv_input, ())
             self.run_removedead()
         except:
             print("Error in thread!")
 
-    def udp(self):
-        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
-        sender = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-        listener = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-        _thread.start_new_thread(self.run_sender, (sender,addrinfo,))
-        _thread.start_new_thread(self.run_listener, (listener,addrinfo,))
-        _thread.start_new_thread(self.recv_input, ())
+
+
 
     """
+        Pacote enviado para informar o caminho até ao nodo pretendido, verificando inicialmente se o nodo que
+        originou o ROUTE REQUEST já não está à espera da resposta, devido a timeout.
+        Caso ainda esteja, é verificado na sua tabela de reencaminhamento, o ip do nodo para o qual irá enviar
+        o reply (nodo que está na última posição no array que contêm o caminho), de modo a chegar ao nodo origem.
+        É enviado o nodo com o tipo 2 (tipo Route Reply, explicado na função run_listener)
     """
     def route_reply(self, stamp, nameViz,  path,  nameNode, timeout):
         if((int(time.time())-stamp <= timeout)):
@@ -63,16 +68,22 @@ class Hello:
             bytes_to_send = json.dumps([2, nameNode, path, stamp, timeout]).encode()
             ip = self.table[nameViz][1]
             s.sendto(bytes_to_send, (ip, self.port)) #Enviar os vizinhos diretos
-        else:
-            print(str(int(time.time())-stamp))
 
 
 
     """
+        Pacote enviado para conhecer um caminho até um nodo que não esteja na tabela de reencaminhamento.
+        É verificado inicialmente se o nodo que originou o ROUTE REQUEST já não está à espera da resposta, devido a timeout.
+        Caso ainda esteja à espera da resposta, é adicionado o seu nome ao caminho desde o nodo de origem, até ao nodo que deseja saber a rota.
+        É enviado um pacote contendo o tipo 1 (tipo ROUTE REQUEST, explicado na função run_listener), juntamente com o timeStamp de quando originou
+        o Route Request, o nome do nodo que deseja saber a rota, é decrementado o número de saltos que poderá dar, é enviado também o
+        caminho já percorrido, e o tempo de timeout.
+        Caso este conheça o nodo em questão, é retirado o último nodo do caminho, de modo a enviar para esse mesmo nodo retirado, um REQUEST REPLY
+        informando que este conheçe o nodo. É acrescentado o seu nome, para atualizar a tabela de reencaminhamento do nodo para o qual enviará o reply.
     """
-    def route_request(self, stamp, name, ttl, path, timeout):
+    def route_request(self, stamp, nameNode, ttl, path, timeout):
         if((int(time.time())-stamp) <= timeout):
-            if name not in self.table:
+            if nameNode not in self.table:
                 if(path == None):
                     path = [self.name]
                 else:
@@ -81,19 +92,19 @@ class Hello:
                 s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
                 ttl_bin = struct.pack('@i', ttl) #ttl=1
                 s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-                bytes_to_send = json.dumps([1, stamp, name, ttl-1, path, timeout]).encode()
+                bytes_to_send = json.dumps([1, stamp, nameNode, ttl-1, path, timeout]).encode()
                 s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             else:
                 nameViz = path.pop()
                 path.append(self.name)
-                self.route_reply(stamp ,nameViz, path, name, timeout)
-        else:
-            print(str(int(time.time())-stamp))
-
+                self.route_reply(stamp ,nameViz, path, nameNode, timeout)
 
 
 
     """
+        Thread que irá receber os pedidos do utilizador, podendo este pedir por um ROUTE REQUEST, tendo que fornecer
+        o nome do nodo que desejará conhecer, o número máximo de saltos, e o tempo que estará à espera de resposta até dar timeout.
+        Ex: ROUTE REQUEST <nome_nodo> <ttl> <timeout>
     """
     def recv_input(self):
         try:
@@ -101,7 +112,10 @@ class Hello:
                 inp = input()
                 array = inp.split()
                 if array[0] == "ROUTE" and array[1] == "REQUEST":
-                    self.route_request(int(time.time()), array[2], int(array[3]), [], int(array[4]))
+                    if(array[2] not in self.table):
+                        self.route_request(int(time.time()), array[2], int(array[3]), [], int(array[4]))
+                    else:
+                        print(self.table)
 
         except EOFError:
             pass
@@ -130,12 +144,12 @@ class Hello:
     """
         Atualiza a self.table com as informações do vizinho em questão, atualizando o valor na tabela caso:
         1. O nome do vizinho que enviou for igual, atualizando as informações, caso a rede tenha mudado
-        2. O rtt for menor
+        2. O rtt for menor ou igual
         3. Não exista registo na tabela desse vizinho
         @senderName - Nome do vizinho que enviou o hello
         @senderIP - IP do vizinho que envou o hello
         @vizName - Nome de um dos vizinhos contidos no hello
-        @vizInfo - Array que contêm o ip do vizinho contido no hello, e o rtt da ligação
+        @vizRTT - Rtt da ligação do nodo vizinho que enviou o pacote hello, com o vizinho a uma distância de 2 saltos deste
         @timeStamp - Tempo de quando recebeu o pacote hello
         @rtt - RTT desde este nodo até ao vizinho que enviou o hello
     """
@@ -148,7 +162,22 @@ class Hello:
             self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
 
 
-
+    """
+        Thread que está à escuta por pacotes UDP. Assim que os recebe, realiza o parse dependendo do tipo do pacote:
+        0. Pacote hello- Contêm o timeStamp de quando foi enviado o pacote, de modo a calcular o rtt da conexão, contêm
+        o nome de quem enviou, e os seus vizinhos diretos. É retirado o ip de quem enviou o pacote, e caso o pacote não tenha
+        sido enviado por ele mesmo, será atualizada a tabela de routing, inicialmente com os dados de quem enviou o pacote, sendo
+        de seguida atualizado com os vizinhos diretos de quem enviou o pacote hello.
+        1. Pacote Route Request- Pacote enviado por quem deseja conhecer alguém que não esteja na sua tabela de routing. É recebido
+        o caminho que o pacote já percorreu, o timeStamp de quando o Route Request foi enviado, de modo a verificar se já deu timeout,
+        o nome do nodo para o qual deseja saber a rota, o número de saltos máximos que o pacote poderá dar, e o tempo limite que o nodo
+        de qual originou o request estará à espera de resposta.
+        2. Pacote Request Reply- Pacote enviado por quem conhece o nodo de um pacote Route Request. É retirado o ip de quem enviou
+        o reply, juntamente com o nodo que o route request deseja conhecer, o timeStamp de quando o Route Request foi enviado, para verificar
+        se já deu timeout, o tempo máximo até dar timeout, e é retirado do caminho, obtido através do route request, o último nodo, de modo a atualizar
+        a tabela de reencaminhamento, adicionando o nodo que o route request deseja conhecer, o nodo vizinho que deverá aceder de modo a aceder a esse mesmo
+        nodo, e o seu ip.
+    """
     def run_listener(self, s, addrinfo):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('', self.port))
@@ -174,7 +203,6 @@ class Hello:
                     for vizName in vizinhos:
                         if vizName != self.name:
                             self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
-                    #print(self.table)
             if tipo == 1:
                 path = array[4]
                 if self.name not in path:
@@ -195,7 +223,8 @@ class Hello:
                     nameSend = path.pop()
                     path.append(self.name)
                     self.route_reply(stamp, nameSend, path, nameNode, timeout)
-                print(self.table)
+                else:
+                    print(self.table)
 
 
 

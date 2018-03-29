@@ -39,35 +39,89 @@ class Hello:
     """
     def run_probe(self):
         try:
-            _thread.start_new_thread(self.run_listener, ())
-            _thread.start_new_thread(self.run_sender, ())
+            _thread.start_new_thread(self.udp, ())
             self.run_removedead()
         except:
             print("Error in thread!")
+
+    def udp(self):
+        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+        sender = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+        listener = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+        _thread.start_new_thread(self.run_sender, (sender,addrinfo,))
+        _thread.start_new_thread(self.run_listener, (listener,addrinfo,))
+        _thread.start_new_thread(self.recv_input, ())
+
+    """
+    """
+    def route_reply(self, stamp, nameViz,  path,  nameNode, timeout):
+        if((int(time.time())-stamp <= timeout)):
+            addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+            s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+            ttl_bin = struct.pack('@i', 1) #ttl=1
+            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+            bytes_to_send = json.dumps([2, nameNode, path, stamp, timeout]).encode()
+            ip = self.table[nameViz][1]
+            s.sendto(bytes_to_send, (ip, self.port)) #Enviar os vizinhos diretos
+        else:
+            print(str(int(time.time())-stamp))
+
+
+
+    """
+    """
+    def route_request(self, stamp, name, ttl, path, timeout):
+        if((int(time.time())-stamp) <= timeout):
+            if name not in self.table:
+                if(path == None):
+                    path = [self.name]
+                else:
+                    path.append(self.name)
+                addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+                s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+                ttl_bin = struct.pack('@i', ttl) #ttl=1
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+                bytes_to_send = json.dumps([1, stamp, name, ttl-1, path, timeout]).encode()
+                s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
+            else:
+                nameViz = path.pop()
+                path.append(self.name)
+                self.route_reply(stamp ,nameViz, path, name, timeout)
+        else:
+            print(str(int(time.time())-stamp))
+
+
+
+
+    """
+    """
+    def recv_input(self):
+        try:
+            while True:
+                inp = input()
+                array = inp.split()
+                if array[0] == "ROUTE" and array[1] == "REQUEST":
+                    self.route_request(int(time.time()), array[2], int(array[3]), [], int(array[4]))
+
+        except EOFError:
+            pass
 
     """
         Thread que envia a mensagem hello, enviando o seu dicionario, contendo
         os seus vizinhos diretos, enviando para o grupo IPv6 (self.ipv6_group)
         atraves de UDP (socket.SOCK_DGRAM), com apenas TTL=1 (ttl_bin)
     """
-    def run_sender(self):
-        #Retirar isto
-        time.sleep(0.1)
-        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
-        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+    def run_sender(self, s, addrinfo):
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-        adress = socket.getaddrinfo(self.ipv6_group , self.port, socket.AF_INET6)
+        #_thread.start_new_thread(self.recv_input, s, addrinfo[4][0])
         while True:
             self.hello = {}
             for nameViz in self.table:
                 if nameViz == self.table[nameViz][0]:
-                    array = []
-                    array.append(self.table[nameViz][1])
-                    array.append(self.table[nameViz][4])
-                    self.hello[nameViz] = array
-
-            bytes_to_send = json.dumps([int(time.time()), self.name, self.hello]).encode()
+                    self.hello[nameViz] = self.table[nameViz][3]
+            #primeiro valor a 0 significa que é um Hello
+            bytes_to_send = json.dumps([0, int(time.time()), self.name, self.hello]).encode()
             s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             time_add = random.randrange(-math.floor(self.hello_int * 0.1),
                                          math.floor(self.hello_int * 0.1))
@@ -85,20 +139,17 @@ class Hello:
         @timeStamp - Tempo de quando recebeu o pacote hello
         @rtt - RTT desde este nodo até ao vizinho que enviou o hello
     """
-    def updateTable(self, senderName, senderIP, vizName, vizInfo, timeStamp, rtt):
+    def updateTable(self, senderName, senderIP, vizName, vizRTT, timeStamp, rtt):
         if vizName in self.table:
             data = self.table[vizName]
-            if(data[0] == senderName or data[4] > (rtt+vizInfo[1]) or (timeStamp - data[3] < 20000)):
-                self.table[vizName] = [senderName, senderIP, vizInfo[0], timeStamp, rtt+int(vizInfo[1])]
+            if(data[0] == senderName or data[4] >= (rtt+vizRTT) or (timeStamp - data[3] < 20000)):
+                self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
         else:
-            self.table[vizName] = [senderName, senderIP, vizInfo[0], timeStamp, rtt+int(vizInfo[1])]
+            self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
 
 
 
-    def run_listener(self):
-        global ROUTING_TABLE
-        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
-        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+    def run_listener(self, s, addrinfo):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('', self.port))
         group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
@@ -110,18 +161,46 @@ class Hello:
             data, sender = s.recvfrom(1500)
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
             array = json.loads(data.decode())
-            timeStamp = array[0]
-            rtt = int(time.time())-timeStamp
-            senderName = array[1]
-            vizinhos = array[2]
-            senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-            print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
-            if senderName != self.name:
-                self.updateTable(senderName, senderIP, senderName, [senderIP, 0], timeStamp, rtt)
-                for vizName in vizinhos:
-                    if vizName != self.name:
-                        self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
+            tipo = array[0]
+            if tipo == 0:
+                timeStamp = array[1]
+                rtt = int(time.time())-timeStamp
+                senderName = array[2]
+                vizinhos = array[3]
+                senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
+                #print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
+                if senderName != self.name:
+                    self.updateTable(senderName, senderIP, senderName, 0, timeStamp, rtt)
+                    for vizName in vizinhos:
+                        if vizName != self.name:
+                            self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
+                    #print(self.table)
+            if tipo == 1:
+                path = array[4]
+                if self.name not in path:
+                    timeStamp = array[1]
+                    name = array[2]
+                    ttl = array[3]
+                    timeout = array[5]
+                    self.route_request(timeStamp, name, ttl, path, timeout)
+            if tipo == 2:
+                senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
+                nameNode = array[1]
+                path = array[2]
+                stamp = array[3]
+                timeout = array[4]
+                nameViz = path.pop()
+                self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
+                if len(path) != 0:
+                    nameSend = path.pop()
+                    path.append(self.name)
+                    self.route_reply(stamp, nameSend, path, nameNode, timeout)
                 print(self.table)
+
+
+
+
+
 
     def run_removedead(self):
         while True:

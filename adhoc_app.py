@@ -112,22 +112,23 @@ class Hello:
             while True:
                 inp = input(self.name+ "#>")
                 command = inp.split()
-                if command[0] == 'route' and command[1] == 'request':
-                    if(command[2] not in self.table):
-                        self.route_request(int(time.time()), command[2], int(command[3]), [], int(command[4]))
-                    else:
+                if len(command) > 0:
+                    if command[0] == 'route' and command[1] == 'request':
+                        if(command[2] not in self.table):
+                            self.route_request(int(time.time()), command[2], int(command[3]), [], int(command[4]))
+                        else:
+                            print(self.table)
+                    elif command[0] == 'help':
+                        self.printhelp()
+                    elif len(command)==1 and command[0] == 'route':
+                        print("Current routing table:")
+                        print("Node Name    | IPV6 address          | Next hop              | Next hop RTT    | Timestamp     | RTT")
                         print(self.table)
-                elif command[0] == 'help':
-                    self.printhelp()
-                elif len(command)==1 and command[0] == 'route':
-                    print("Current routing table:")
-                    print("Node Name    | IPV6 address          | Next hop              | Next hop RTT    | Timestamp     | RTT")
-                    print(self.table)
-                elif len(command)==1 and command[0] == 'hello':
-                    print("Current hello table:")
-                    print(self.hello)
-                else:
-                    print("Invalid command!")
+                    elif len(command)==1 and command[0] == 'hello':
+                        print("Current hello table:")
+                        print(self.hello)
+                    else:
+                        print("Invalid command!")
                     
 
 

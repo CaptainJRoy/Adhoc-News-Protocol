@@ -1,5 +1,5 @@
 import time, struct, socket, sys, json
-import _thread, math, random, datetime, subprocess
+import _thread, math, random, subprocess
 """
 Dicionario hello guarda a lista dos IPs dos vizinhos e o timestamp do ultimo refresh
 Cada no recebera hellos de seus vizinhos, que por sua vez tera a lista dos vizinhos dos vizinhos.
@@ -9,14 +9,9 @@ Uma funcao tem que varrer a estrutura hello e remover os IPs mais antigos que de
 A funcao que recebe os hellos via UDP adiciona os novos IPs na estrutura hello
 """
 
-
-ROUTING_TABLE = {}
-
-
-
-class Hello:
+class AdhocRoute:
     #Iniciar a classe Hello
-    def __init__(self, probing=10, group='ff02::1', deadint=600, port=9999):
+    def __init__(self, probing=10, group='ff02::1', deadint=60, port=9999):
         """
             @self.hello_int - intervalo de tempo entre envio de pacotes hello
             @self.dead_interval - intervalo de tempo ate considerar um no desconectado
@@ -45,6 +40,7 @@ class Hello:
             _thread.start_new_thread(self.run_sender, (sender,addrinfo,))
             _thread.start_new_thread(self.run_listener, (listener,addrinfo,))
             _thread.start_new_thread(self.recv_input, ())
+            _thread.start_new_thread(self.receiver_tcp, ())
             self.run_removedead()
         except:
             print("Error in thread!")
@@ -127,6 +123,9 @@ class Hello:
                     elif len(command)==1 and command[0] == 'hello':
                         print("Current hello table:")
                         print(self.hello)
+                    elif len(command)==1 and command[0] == 'clear':
+                        #print ("\n" * 100)
+                        print("\033c")
                     else:
                         print("Invalid command!")
                     
@@ -269,14 +268,19 @@ class Hello:
                     self.route_reply(stamp, nameSend, path, nameNode, timeout)
                 #else:
                     #print(self.table)
-
+            if tipo == 3:
+                senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
+                message_timestamp = array[1]
+                sender_name = array[2]
+                message = array[3]
+                print(message)
 
     def run_removedead(self):
         while True:
             time.sleep(10)
             for dest in self.table:
                 table=self.table[dest]
-                if((int(time.time())-table[2])>60):
+                if((int(time.time())-table[2])>self.dead_interval):
                     del self.table[dest]
                     break               
 
@@ -289,29 +293,51 @@ class Hello:
         print("route - prints the current routing table")
         print("route request [computer_name] - request the route to computer")
         print("hello - prints the current hello table")
-        print("ping [computer_name] - sends a small package to teste the routing table")
+        print("clear - clears the screen")
+        print("ping [computer_name] - sends a small package to test the routing table")
         print()
 
 
-def sender_tcp():
-    global MYGROUP_6, PROBE_TIME
+    def sender_tcp():
+        tcp_s = socket.socket(addrinfo[0], socket.SOCK_STREAM)
+        #ttl_bin = struct.pack('@i', 1)
+        #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+        while True:
+            #data = int(time.time())
+            #tcp_s.sendto(data + '\0', (addrinfo[4][0], self.port))
+            time.sleep(20)
 
-    #STREAM - TCP
-    s = socket.socket(addrinfo[0], socket.SOCK_STREAM)
-    ttl_bin = struct.pack('@i', MYTTL)
-    #verificar IPv6 target
-    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-    while True:
-        data = repr(time.time())
-        s.sendto(data + '\0', (addrinfo[4][0], self.port))
-        time.sleep(PROBE_TIME)
-
-
+    def receiver_tcp(self):
+        tcp_r = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        try:
+            tcp_r.bind(('', self.port))
+        except:
+            print ('Problem binding')
+            sys.exit()
+        tcp_r.listen(10)
+         
+        #ttl_bin = struct.pack('@i', 1)
+        #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+        while True:
+            conn, sender = tcp_r.accept()
+            print(sender[0], " connected with port ", sender[1])
+            data = conn.recv(1024)
+            #print(data)
+            #Gets the message and connects to the UDP server (the router) in localhost machine
+            udp_router.connect(('::1', self.port))
+            bytes_to_send = json.dumps([3, int(time.time()), self.name, str(data)]).encode()
+            udp_router.send(bytes_to_send)
+            #conn.send(("mundo").encode())
+            #data = int(time.time())
+            #tcp_s.sendto(data + '\0', (addrinfo[4][0], self.port))
+            conn.close()
+            time.sleep(20)
 
 
 if __name__ == '__main__':
     try:
-        prob = Hello()
+        prob = AdhocRoute()
         prob.run_probe()
     except KeyboardInterrupt:
         print('Exiting')

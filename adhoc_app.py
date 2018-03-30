@@ -26,6 +26,7 @@ class AdhocRoute:
         self.hello = {}
         self.table = {}
         self.port = port
+        self.news_port=9998
         self.name = sys.argv[1]
     """
         Corre as threads que enviam mensagens de protocolo hello,
@@ -209,6 +210,7 @@ class AdhocRoute:
         se já deu timeout, o tempo máximo até dar timeout, e é retirado do caminho, obtido através do route request, o último nodo, de modo a atualizar
         a tabela de reencaminhamento, adicionando o nodo que o route request deseja conhecer, o nodo vizinho que deverá aceder de modo a aceder a esse mesmo
         nodo, e o seu ip.
+        3. Pacote News application
     """
     def run_listener(self, s, addrinfo):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -270,10 +272,41 @@ class AdhocRoute:
                     #print(self.table)
             if tipo == 3:
                 senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-                message_timestamp = array[1]
+                header = array[1]
                 sender_name = array[2]
-                message = array[3]
-                print(message)
+                msg_dest = array[3]
+                request = array[4]
+                if sender_name==self.name: #we are running the client
+                    reply_to=sender
+
+                if header == "MSG": # got a message
+                    if msg_dest == self.name: #if message is for us, open
+                        if request[0] == "GET":
+                            print("someone is requesting news from me")
+                            news = self.get_news()
+                            udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+                            udp_router.connect(('::1', self.port))
+                            data = ["NEWS",msg_dest,sender_name,news]
+                            bytes_to_send = json.dumps([3, "MSG", msg_dest, sender_name, data]).encode()
+                            udp_router.send(bytes_to_send)
+                            #print(news)
+                        elif request[0] == "NEWS":
+                            print("got some news for us")
+                            s.sendto(request[3].encode(),reply_to)
+                        else:
+                            print("got a malformed MSG")
+                    else:
+                        table=self.table[msg_dest]
+                        print("got a message not for us")
+                        print("checking routing table, adding header and forwaring")
+                        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+                        fwd_s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
+                        ttl_bin = struct.pack('@i', 1)
+                        fwd_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+                        fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
+                        print(table)
+                else:
+                    print("Got a malformed message. Discarding.")
 
     def run_removedead(self):
         while True:
@@ -282,7 +315,14 @@ class AdhocRoute:
                 table=self.table[dest]
                 if((int(time.time())-table[2])>self.dead_interval):
                     del self.table[dest]
-                    break               
+                    break
+
+    def get_news(self):
+        getnews_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        getnews_s.connect(('::1', self.news_port))
+        news = getnews_s.recv(1024)
+        #print(news.decode())
+        return news.decode()
 
 
     def printhelp(self):
@@ -320,19 +360,25 @@ class AdhocRoute:
         #ttl_bin = struct.pack('@i', 1)
         #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
-            conn, sender = tcp_r.accept()
+            conn, sender = tcp_r.accept() #locks until we get something
             print(sender[0], " connected with port ", sender[1])
-            data = conn.recv(1024)
-            #print(data)
+            data = json.loads(conn.recv(1024).decode())
+            Verb= data[0]
+            Object= data[1]
             #Gets the message and connects to the UDP server (the router) in localhost machine
             udp_router.connect(('::1', self.port))
-            bytes_to_send = json.dumps([3, int(time.time()), self.name, str(data)]).encode()
+            bytes_to_send = json.dumps([3, "MSG", self.name, Object, data]).encode()
             udp_router.send(bytes_to_send)
-            #conn.send(("mundo").encode())
+            news=udp_router.recv(1024)
+            #news=("teste").encode()
+            print(news)
+            tcp_r.send(news)
             #data = int(time.time())
             #tcp_s.sendto(data + '\0', (addrinfo[4][0], self.port))
             conn.close()
             time.sleep(20)
+
+    
 
 
 if __name__ == '__main__':

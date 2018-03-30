@@ -22,8 +22,11 @@ class NewsAgent:
         try:
             if self.function == "client":
                 _thread.start_new_thread(self.run_client, ())
-            if self.function == "server":
+            elif self.function == "server":
                 _thread.start_new_thread(self.run_server, ())
+            else:
+                self.printhelp()
+                sys.exit()
             self.run_main()
         except:
             print("Quiting")
@@ -39,6 +42,12 @@ class NewsAgent:
                     elif command[0] == 'quit':
                         self.quit = 1
                         sys.exit()
+                    elif len(command) == 2:
+                        if command[0] == 'get':
+                            self.getnews(command[1])
+                    else:
+                        print("Invalid command")
+                        self.printhelp()
                 
         except EOFError:
             pass
@@ -56,8 +65,8 @@ class NewsAgent:
             conn, sender = news_s.accept()
             print("Client ",sender[0], " connected with port ", sender[1])
             bytes_to_send = json.dumps([int(time.time()), self.news_bank]).encode()
-            teste = conn.send(bytes_to_send)
-            print ("Sent ", teste, "Bytes to client")
+            bytessent = conn.send(bytes_to_send)
+            print ("Sent ", bytessent , "Bytes to client")
             conn.close()
             time.sleep(20)
     def run_main(self):
@@ -78,6 +87,16 @@ class NewsAgent:
         print("To use as client:")
         print()
 
+    def getnews(self,server):
+        print("Server started, trying to open socket.")
+        getnews_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        print("Trying to connect to application layer (adhoc router)")
+        getnews_s.connect(('::1', self.router_port))
+        print("Resquesting news to server: ", server)
+        bytes_to_send = json.dumps(["GET",server]).encode()
+        bytessent=getnews_s.send(bytes_to_send)
+        news=getnews_s.recv(1024)
+        print(news)
 
 if __name__ == '__main__':
     try:

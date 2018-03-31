@@ -36,6 +36,7 @@ class AdhocRoute:
     def run_probe(self):
         try:
             _thread.start_new_thread(self.udp_listener, ())
+            _thread.start_new_thread(self.receiver_tcp, ())
             _thread.start_new_thread(self.recv_input, ())
             self.run_sender()
         except:
@@ -303,35 +304,39 @@ class AdhocRoute:
                 sender_name = array[2]
                 msg_dest = array[3]
                 request = array[4]
-                if sender_name==self.name: #we are running the client
-                    reply_to=sender
-
+                #print("Got a type 3 msg")
                 if header == "MSG": # got a message
                     if msg_dest == self.name: #if message is for us, open
                         if request[0] == "GET":
-                            print("someone is requesting news from me")
+                            #print("GET: ",data)
                             news = self.get_news()
                             udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
                             udp_router.connect(('::1', self.port))
                             data = ["NEWS",msg_dest,sender_name,news]
                             bytes_to_send = json.dumps([3, "MSG", msg_dest, sender_name, data]).encode()
                             udp_router.send(bytes_to_send)
-                            #print(news)
+                            udp_router.close()
                         elif request[0] == "NEWS":
-                            print("got some news for us")
-                            s.sendto(request[3].encode(),reply_to)
+                            #print("NEWS: ",data)
+                            tcp_sendnews = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                            tcp_sendnews.connect(('::1', self.port))
+                            bytes_to_send = json.dumps(request).encode()
+                            bytessent=tcp_sendnews.send(bytes_to_send)
+                            tcp_sendnews.close()
+                            
                         else:
-                            print("got a malformed MSG")
+                            print("Got a malformed message. Discarding.")
                     else:
-                        table=self.table[msg_dest]
-                        print("got a message not for us")
-                        print("checking routing table, adding header and forwaring")
-                        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
-                        fwd_s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-                        ttl_bin = struct.pack('@i', 1)
-                        fwd_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-                        fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
-                        print(table)
+                        #print("NFM: ",data)
+                        try:
+                            table=self.table[msg_dest]
+                        except:
+                            print("Not in routing table :(")
+                        fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+                        fwd_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        bytes_sent=fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
+                        print("NFM: Sent:", bytes_sent," bytes")
+                        
                 else:
                     print("Got a malformed message. Discarding.")
 
@@ -357,45 +362,35 @@ class AdhocRoute:
         print()
 
 
-    def sender_tcp():
-        tcp_s = socket.socket(addrinfo[0], socket.SOCK_STREAM)
-        #ttl_bin = struct.pack('@i', 1)
-        #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-        while True:
-            #data = int(time.time())
-            #tcp_s.sendto(data + '\0', (addrinfo[4][0], self.port))
-            time.sleep(20)
-
     def receiver_tcp(self):
         tcp_r = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         try:
             tcp_r.bind(('', self.port))
         except:
-            print ('Problem binding')
+            print ('Problem binding TCP listener')
             sys.exit()
-        tcp_r.listen(10)
-
+        tcp_r.listen()
+         
         #ttl_bin = struct.pack('@i', 1)
         #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
             conn, sender = tcp_r.accept() #locks until we get something
-            print(sender[0], " connected with port ", sender[1])
+            #print(sender[0], " connected with port ", sender[1])
             data = json.loads(conn.recv(1024).decode())
-            Verb= data[0]
-            Object= data[1]
-            #Gets the message and connects to the UDP server (the router) in localhost machine
-            udp_router.connect(('::1', self.port))
-            bytes_to_send = json.dumps([3, "MSG", self.name, Object, data]).encode()
-            udp_router.send(bytes_to_send)
-            news=udp_router.recv(1024)
-            #news=("teste").encode()
-            print(news)
-            tcp_r.send(news)
-            #data = int(time.time())
-            #tcp_s.sendto(data + '\0', (addrinfo[4][0], self.port))
-            conn.close()
-            time.sleep(20)
+            Verb= data[0] #GET OR NEWS
+            Object= data[1] #DESTINATION
+            if Verb == "GET":
+                #Gets the request and connects to the UDP server (the router) in localhost machine
+                client_conn = conn
+                udp_router.connect(('::1', self.port))
+                bytes_to_send = json.dumps([3, "MSG", self.name, Object, data]).encode() #ADD MSG header
+                udp_router.send(bytes_to_send)
+            elif Verb == "NEWS":
+                news=data[3]
+                client_conn.send(news.encode())
+                client_conn.close()
+                conn.close()
 
 
 

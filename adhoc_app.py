@@ -35,14 +35,9 @@ class AdhocRoute:
     """
     def run_probe(self):
         try:
-            addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
-            sender = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-            listener = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
-            _thread.start_new_thread(self.run_sender, (sender,addrinfo,))
-            _thread.start_new_thread(self.run_listener, (listener,addrinfo,))
+            _thread.start_new_thread(self.udp_listener, ())
             _thread.start_new_thread(self.recv_input, ())
-            _thread.start_new_thread(self.receiver_tcp, ())
-            self.run_removedead()
+            self.run_sender()
         except:
             print("Error in thread!")
 
@@ -111,7 +106,9 @@ class AdhocRoute:
                 command = inp.split()
                 if len(command) > 0:
                     if len(command)>1 and command[0] == 'route' and command[1] == 'request':
-                        if(command[2] not in self.table):
+                        if(len(command) < 5):
+                            print("route request <node_name> <ttl> <timeout>")
+                        elif(command[2] not in self.table):
                             self.route_request(int(time.time()), command[2], int(command[3]), [], int(command[4]))
                         else:
                             print(self.table)
@@ -119,8 +116,10 @@ class AdhocRoute:
                         self.printhelp()
                     elif len(command)==1 and command[0] == 'route':
                         print("Current routing table:")
-                        print("Node Name |  Next hop    | IPV6 address  | Next hop RTT | Timestamp  | RTT")
-                        print(self.table)
+                        print("Node Name\t| Next hop\t| IPV6 address\t\t| Timestamp\t| RTT")
+                        for name in self.table:
+                            data = self.table[name]
+                            print(name+ "\t\t| " + data[0] + "\t\t| " + data[1] + "\t| " + str(data[2]) + "\t| " + str(data[3]))
                     elif len(command)==1 and command[0] == 'hello':
                         print("Current hello table:")
                         print(self.hello)
@@ -129,25 +128,42 @@ class AdhocRoute:
                         print("\033c")
                     else:
                         print("Invalid command!")
-                    
+
 
 
         except EOFError:
             pass
 
     """
+        Remove todos os vizinhos antigos dos registos de reencaminhamento, retirando todos os registos
+        que não sejam atualizados entre dois protocolos hello. Remove também todas as conexões que passem por
+        esse mesmo vizinho.
+    """
+    def remove_dead(self):
+        arrayDead = []
+        for name in self.table:
+            if((int(time.time())-self.table[name][2])>(2*self.hello_int) or (name in arrayDead)):
+                arrayDead.append(name)
+        for name in arrayDead:
+            del self.table[name]
+
+    """
         Thread que envia a mensagem hello, enviando o seu dicionario, contendo
         os seus vizinhos diretos, enviando para o grupo IPv6 (self.ipv6_group)
         atraves de UDP (socket.SOCK_DGRAM), com apenas TTL=1 (ttl_bin)
         Caso o tamanho do pacote UDP seja maior 65500, divide-se o número de itens no dicionário
-        até meio, até que o pacote seja menor que 65500
+        até meio, até que o pacote seja menor que 65500.
+        Antes de criar a mensagem hello, remove todos os registos antigos da tabela de reencaminhamento.
     """
-    def run_sender(self, s, addrinfo):
+    def run_sender(self):
+        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
         ttl_bin = struct.pack('@i', 1) #ttl=1
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         limit = 65500
         n = 0
         while True:
+            self.remove_dead()
             self.hello = {}
             for nameViz in self.table:
                 if nameViz == self.table[nameViz][0]:
@@ -212,7 +228,9 @@ class AdhocRoute:
         nodo, e o seu ip.
         3. Pacote News application
     """
-    def run_listener(self, s, addrinfo):
+    def udp_listener(self):
+        addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
+        s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('', self.port))
         group_bin = socket.inet_pton(addrinfo[0], addrinfo[4][0])
@@ -225,27 +243,27 @@ class AdhocRoute:
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
             array = json.loads(data.decode())
             tipo = array[0]
-            
+
             if tipo == 0:
                 timeStamp = array[1]
                 rtt = int(time.time())-timeStamp
                 senderName = array[2]
                 vizinhos = array[3]
-                
+
                 senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-                
+
                 #print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
                 if senderName != self.name:
                     self.updateTable(senderName, senderIP, senderName, 0, timeStamp, rtt)
                     for vizName in vizinhos:
-                        
+
                         #print(str(dest[0]))
                         if vizName != self.name:
                             try:
                                 destino=self.table[vizName]
                                 if vizName!=destino[0]:
                                     self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
-                                
+
                             except:
                                 self.updateTable(senderName, senderIP, vizName, vizinhos.get(vizName), timeStamp, rtt)
             if tipo == 1:
@@ -263,13 +281,22 @@ class AdhocRoute:
                 stamp = array[3]
                 timeout = array[4]
                 nameViz = path.pop()
-                self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
                 if len(path) != 0:
+                    self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
                     nameSend = path.pop()
                     path.append(self.name)
                     self.route_reply(stamp, nameSend, path, nameNode, timeout)
-                #else:
-                    #print(self.table)
+                else:
+                    if (int(time.time()) - stamp) < timeout:
+                        #Descartar todos os route replys após o primeiro a chegar
+                        if nameNode in self.table:
+                            rtt = int(time.time()) - stamp
+                            if (int(time.time()) - self.table[nameNode][2]) > timeout:
+                                self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
+                                print("Encontrei caminho para o nodo")
+                        else:
+                            self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
+                            print("Encontrei caminho para o nodo")
             if tipo == 3:
                 senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
                 header = array[1]
@@ -308,14 +335,6 @@ class AdhocRoute:
                 else:
                     print("Got a malformed message. Discarding.")
 
-    def run_removedead(self):
-        while True:
-            time.sleep(10)
-            for dest in self.table:
-                table=self.table[dest]
-                if((int(time.time())-table[2])>self.dead_interval):
-                    del self.table[dest]
-                    break
 
     def get_news(self):
         getnews_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
@@ -356,7 +375,7 @@ class AdhocRoute:
             print ('Problem binding')
             sys.exit()
         tcp_r.listen(10)
-         
+
         #ttl_bin = struct.pack('@i', 1)
         #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
         while True:
@@ -378,7 +397,7 @@ class AdhocRoute:
             conn.close()
             time.sleep(20)
 
-    
+
 
 
 if __name__ == '__main__':

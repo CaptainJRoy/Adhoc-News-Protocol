@@ -36,15 +36,11 @@ class AdhocRoute:
     def run_probe(self):
         try:
             _thread.start_new_thread(self.udp_listener, ())
-            _thread.start_new_thread(self.receiver_tcp, ())
+            _thread.start_new_thread(self.tcp_listener, ())
             _thread.start_new_thread(self.recv_input, ())
             self.run_sender()
         except:
             print("Error in thread!")
-
-
-
-
 
     """
         Pacote enviado para informar o caminho até ao nodo pretendido, verificando inicialmente se o nodo que
@@ -201,14 +197,9 @@ class AdhocRoute:
     def updateTable(self, senderName, senderIP, vizName, vizRTT, timeStamp, rtt):
         if vizName in self.table:
             data = self.table[vizName]
-            #print ("DBG1")
-            #print(data)
-            #if(data[0] == senderName or data[3] >= (rtt+vizRTT) or (timeStamp - data[2] < 20000)):
             if(data[0] == senderName or data[3] >= (rtt+vizRTT)):
-                #print ("DBG2")
                 self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
         else:
-            #print ("DBG3")
             self.table[vizName] = [senderName, senderIP, timeStamp, rtt+int(vizRTT)]
 
 
@@ -304,7 +295,6 @@ class AdhocRoute:
                 sender_name = array[2]
                 msg_dest = array[3]
                 request = array[4]
-                #print("Got a type 3 msg")
                 if header == "MSG": # got a message
                     if msg_dest == self.name: #if message is for us, open
                         if request[0] == "GET":
@@ -328,14 +318,19 @@ class AdhocRoute:
                             print("Got a malformed message. Discarding.")
                     else:
                         #print("NFM: ",data)
-                        try:
-                            table=self.table[msg_dest]
-                        except:
-                            print("Not in routing table :(")
                         fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
                         fwd_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        bytes_sent=fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
-                        print("NFM: Sent:", bytes_sent," bytes")
+                        if(msg_dest in self.table):
+                            table=self.table[msg_dest]
+                            bytes_sent=fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
+                        elif(msg_dest not in self.table):
+                            #print("Not in routing table, trying route request.")
+                            self.route_request(int(time.time()), msg_dest, 10, [], 10)
+                            #time.sleep(10)
+                            #print(self.table)
+                            #table=self.table[msg_dest]
+                            bytes_sent=fwd_s.sendto(data, ("::1", self.port)) #Enviar ao nexthop verificado na tabela de roteamento
+                            #print("NFM: Sent:", bytes_sent," bytes")
                         
                 else:
                     print("Got a malformed message. Discarding.")
@@ -343,10 +338,14 @@ class AdhocRoute:
 
     def get_news(self):
         getnews_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        getnews_s.connect(('::1', self.news_port))
-        news = getnews_s.recv(1024)
+        #getnews_s.connect(('::1', self.news_port))
+        #news = getnews_s.recv(1024)
+        #return news.decode()
+        news = ("Those are the local news from:", self.name)
+        getnews_s.close()
+        return news
         #print(news.decode())
-        return news.decode()
+        #return news.decode()
 
 
     def printhelp(self):
@@ -362,21 +361,18 @@ class AdhocRoute:
         print()
 
 
-    def receiver_tcp(self):
+    def tcp_listener(self):
         tcp_r = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         try:
             tcp_r.bind(('', self.port))
         except:
-            print ('Problem binding TCP listener')
+            print ('Problem binding TCP listener. You killed an open tcp socket, wait until you restart again.')
             sys.exit()
         tcp_r.listen()
-         
-        #ttl_bin = struct.pack('@i', 1)
-        #tcp_s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
+
         while True:
             conn, sender = tcp_r.accept() #locks until we get something
-            #print(sender[0], " connected with port ", sender[1])
             data = json.loads(conn.recv(1024).decode())
             Verb= data[0] #GET OR NEWS
             Object= data[1] #DESTINATION
@@ -388,11 +384,9 @@ class AdhocRoute:
                 udp_router.send(bytes_to_send)
             elif Verb == "NEWS":
                 news=data[3]
-                client_conn.send(news.encode())
+                client_conn.send(json.dumps(news).encode())
                 client_conn.close()
                 conn.close()
-
-
 
 
 if __name__ == '__main__':

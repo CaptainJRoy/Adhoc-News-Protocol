@@ -50,13 +50,14 @@ class AdhocRoute:
         o reply (nodo que está na última posição no array que contêm o caminho), de modo a chegar ao nodo origem.
         É enviado o nodo com o tipo 2 (tipo Route Reply, explicado na função run_listener)
     """
-    def route_reply(self, stamp, nameViz,  path,  nameNode, timeout):
+    def route_reply(self, stamp, nameNode, path, timeout):
         if((int(time.time())-stamp <= timeout)):
             addrinfo = socket.getaddrinfo(self.ipv6_group, None)[0]
             s = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
             ttl_bin = struct.pack('@i', 1) #ttl=1
             s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, ttl_bin)
-            bytes_to_send = json.dumps([2, nameNode, path, stamp, timeout]).encode()
+            bytes_to_send = json.dumps([2, stamp, self.name, nameNode, path, timeout]).encode()
+            nameViz = path.pop()
             ip = self.table[nameViz][1]
             s.sendto(bytes_to_send, (ip, self.port)) #Enviar os vizinhos diretos
 
@@ -86,9 +87,7 @@ class AdhocRoute:
                 bytes_to_send = json.dumps([1, stamp, nameNode, ttl-1, path, timeout]).encode()
                 s.sendto(bytes_to_send, (addrinfo[4][0], self.port)) #Enviar os vizinhos diretos
             else:
-                nameViz = path.pop()
-                path.append(self.name)
-                self.route_reply(stamp ,nameViz, path, nameNode, timeout)
+                self.route_reply(stamp, nameNode, path, timeout)
 
 
 
@@ -272,30 +271,24 @@ class AdhocRoute:
                     timeout = array[5]
                     self.route_request(timeStamp, name, ttl, path, timeout)
             if tipo == 2:
-                senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
-                nameNode = array[1]
-                path = array[2]
-                stamp = array[3]
-                timeout = array[4]
-                nameViz = path.pop()
-                if len(path) != 0:
-                    self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
-                    nameSend = path.pop()
-                    path.append(self.name)
-                    self.route_reply(stamp, nameSend, path, nameNode, timeout)
+                stamp = array[1]
+                nameNode = array[2]
+                nameDest = array[3]
+                path = array[4]
+                timeout = array[5]
+                if len(path) != 1 and (int(time.time()) - stamp) < timeout:
+                    self.updateTable(nameNode, senderIP, nameDest, 0, int(time.time()), 0)
+                    self.route_reply(stamp, nameDest, path, timeout)
                 else:
                     if (int(time.time()) - stamp) < timeout:
                         #Descartar todos os route replys após o primeiro a chegar
-                        if nameNode in self.table:
+                        if nameDest in self.table:
                             rtt = int(time.time()) - stamp
                             if (int(time.time()) - self.table[nameNode][2]) > timeout:
-                                self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
-                                print("Encontrei caminho para o nodo")
+                                self.updateTable(nameNode, senderIP, nameDest, 0, int(time.time()), 0)
                         else:
-                            self.updateTable(nameViz, senderIP, nameNode, 0, int(time.time()), 0)
-                            print("Encontrei caminho para o nodo")
+                            self.updateTable(nameNode, senderIP, nameDest, 0, int(time.time()), 0)
             if tipo == 3:
-                senderIP = (str(sender).rsplit('%', 1)[0])[2:] #Retirar apenas o IPv6
                 header = array[1]
                 sender_name = array[2]
                 msg_dest = array[3]
@@ -303,16 +296,13 @@ class AdhocRoute:
                 if header == "MSG": # got a message
                     if msg_dest == self.name: #if message is for us, open
                         if request[0] == "GET":
-                            #print("GET: ",data)
-                            news = self.get_news()
                             udp_router = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
                             udp_router.connect(('::1', self.port))
-                            data = ["NEWS",msg_dest,sender_name,news]
+                            data = ["NEWS",msg_dest,sender_name,self.news]
                             bytes_to_send = json.dumps([3, "MSG", msg_dest, sender_name, data]).encode()
                             udp_router.send(bytes_to_send)
                             udp_router.close()
                         elif request[0] == "NEWS":
-                            #print("NEWS: ",data)
                             tcp_sendnews = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
                             tcp_sendnews.connect(('::1', self.port))
                             bytes_to_send = json.dumps(request).encode()
@@ -322,34 +312,25 @@ class AdhocRoute:
                         else:
                             print("Got a malformed message. Discarding.")
                     else:
-                        #print("NFM: ",data)
-                        fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-                        fwd_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         if(msg_dest in self.table):
+                            fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
                             table=self.table[msg_dest]
-                            bytes_sent=fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
-                        elif(msg_dest not in self.table):
-                            #print("Not in routing table, trying route request.")
+                            fwd_s.sendto(data, (table[1], self.port)) #Enviar ao nexthop verificado na tabela de roteamento
+                        else:
                             self.route_request(int(time.time()), msg_dest, 10, [], 10)
-                            #time.sleep(10)
-                            #print(self.table)
-                            #table=self.table[msg_dest]
-                            bytes_sent=fwd_s.sendto(data, ("::1", self.port)) #Enviar ao nexthop verificado na tabela de roteamento
-                            #print("NFM: Sent:", bytes_sent," bytes")
+                            _thread.start_new_thread(self.get_news, (data, 10))
 
                 else:
                     print("Got a malformed message. Discarding.")
 
+    def get_news(self, data, timeout=0):
+            time.sleep(timeout/100)
+            if(msg_dest in self.table):
+                fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+                fwd_s.sendto(data, ('::1', self.port))
+            else:
+                print("Não encontrei o nodo")
 
-    def get_news(self):
-        getnews_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        #getnews_s.connect(('::1', self.news_port))
-        #news = getnews_s.recv(1024)
-        #return news.decode()
-        getnews_s.close()
-        return self.news
-        #print(news.decode())
-        #return news.decode()
 
 
     def printhelp(self):

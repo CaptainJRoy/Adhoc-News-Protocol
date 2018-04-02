@@ -28,6 +28,7 @@ class AdhocRoute:
         self.port = port
         self.news_port=9998
         self.name = sys.argv[1]
+        self.news = []
     """
         Corre as threads que enviam mensagens de protocolo hello,
         que escutam por mensagens UDP,, e que escutam por input do utilizador,
@@ -123,6 +124,10 @@ class AdhocRoute:
                     elif len(command)==1 and command[0] == 'clear':
                         #print ("\n" * 100)
                         print("\033c")
+                    elif command[0] == 'set':
+                        self.news.append(" ".join(command[1:]))
+                    elif command[0] == 'news':
+                        print(self.news)
                     else:
                         print("Invalid command!")
 
@@ -313,7 +318,7 @@ class AdhocRoute:
                             bytes_to_send = json.dumps(request).encode()
                             bytessent=tcp_sendnews.send(bytes_to_send)
                             tcp_sendnews.close()
-                            
+
                         else:
                             print("Got a malformed message. Discarding.")
                     else:
@@ -331,7 +336,7 @@ class AdhocRoute:
                             #table=self.table[msg_dest]
                             bytes_sent=fwd_s.sendto(data, ("::1", self.port)) #Enviar ao nexthop verificado na tabela de roteamento
                             #print("NFM: Sent:", bytes_sent," bytes")
-                        
+
                 else:
                     print("Got a malformed message. Discarding.")
 
@@ -341,9 +346,8 @@ class AdhocRoute:
         #getnews_s.connect(('::1', self.news_port))
         #news = getnews_s.recv(1024)
         #return news.decode()
-        news = ("Those are the local news from:", self.name)
         getnews_s.close()
-        return news
+        return self.news
         #print(news.decode())
         #return news.decode()
 
@@ -369,7 +373,7 @@ class AdhocRoute:
         except:
             print ('Problem binding TCP listener. You killed an open tcp socket, wait until you restart again.')
             sys.exit()
-        tcp_r.listen()
+        tcp_r.listen(1)
 
         while True:
             conn, sender = tcp_r.accept() #locks until we get something

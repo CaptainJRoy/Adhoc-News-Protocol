@@ -99,9 +99,10 @@ class NewsAgent:
         getnews_s.connect(('::1', self.router_port))
         print("Resquesting news to server: ", server)
         bytes_to_send = json.dumps(["GET",server]).encode()
-        bytessent=getnews_s.send(bytes_to_send)
+        getnews_s.send(bytes_to_send)
         news=getnews_s.recv(1024)
         args = json.loads(news.decode())
+        getnews_s.close()
         if(args == ""):
             print("Requested node not found")
         else:

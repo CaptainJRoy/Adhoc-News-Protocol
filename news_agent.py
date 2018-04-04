@@ -3,7 +3,7 @@ import _thread, math, random, subprocess
 
 class NewsAgent:
 
-    def __init__(self, router_port=9999, news_port=9998):
+    def __init__(self, router_port=9999, news_port=9999):
         """
 
         """
@@ -48,9 +48,10 @@ class NewsAgent:
                     else:
                         print("Invalid command")
                         self.printhelp()
-                
+
         except EOFError:
             pass
+
     def run_server(self):
         print("Server started, trying to open socket.")
         news_s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
@@ -69,6 +70,7 @@ class NewsAgent:
             print ("Sent ", bytessent , "Bytes to client")
             conn.close()
             time.sleep(20)
+
     def run_main(self):
         print("News agent 0.1, I'm a", self.function)
         while True:
@@ -96,7 +98,11 @@ class NewsAgent:
         bytes_to_send = json.dumps(["GET",server]).encode()
         bytessent=getnews_s.send(bytes_to_send)
         news=getnews_s.recv(1024)
-        print(news)
+        if(len(news) == 0):
+            print("Node not found")
+        else:
+            args = json.loads(news.decode())
+            print(args[3])
 
 if __name__ == '__main__':
     try:

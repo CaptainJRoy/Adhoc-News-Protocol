@@ -83,10 +83,13 @@ class NewsAgent:
         print("AER TP1 - News Agent 0.1")
         print()
         print("To run: python3 news_agent [function]:")
-        print("server - act as a news server")
+        print("server - not int use now")
         print("client - act as a news client")
         print()
         print("To use as client:")
+        print("get [node_name] - Get news from the node")
+        print("help - show this message")
+        print("quit - Exit application")
         print()
 
     def getnews(self,server):
@@ -98,10 +101,10 @@ class NewsAgent:
         bytes_to_send = json.dumps(["GET",server]).encode()
         bytessent=getnews_s.send(bytes_to_send)
         news=getnews_s.recv(1024)
-        if(len(news) == 0):
-            print("Node not found")
+        args = json.loads(news.decode())
+        if(args == ""):
+            print("Requested node not found")
         else:
-            args = json.loads(news.decode())
             print(args[3])
 
 if __name__ == '__main__':

@@ -26,7 +26,6 @@ class AdhocRoute:
         self.hello = {}
         self.table = {}
         self.port = port
-        self.news_port=9999
         self.name = sys.argv[1]
         self.news = []
         self.on = True
@@ -99,9 +98,6 @@ class AdhocRoute:
         try:
             while self.on:
                 inp = input(self.name+ "#>")
-                if inp == "quit":
-                    self.on = False
-                    print("Shutting Down")
                 command = inp.split()
                 if len(command) > 0:
                     if len(command)>1 and command[0] == 'route' and command[1] == 'request':
@@ -128,6 +124,9 @@ class AdhocRoute:
                         self.news.append(" ".join(command[1:]))
                     elif command[0] == 'news':
                         print(self.news)
+                    elif command[0] == 'quit':
+                        self.on = False
+                        print("Shutting Down")
                     else:
                         print("Invalid command!")
 
@@ -241,7 +240,7 @@ class AdhocRoute:
         mreq = group_bin + struct.pack('@I', 0)
         s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
-        # Loop, printing any data we receive
+        # Loop
         while self.on:
             data, sender = s.recvfrom(65535)
             #while data[-1:] == '\0': data = data[:-1] # Strip trailing \0's
@@ -255,12 +254,9 @@ class AdhocRoute:
                 senderName = array[2]
                 vizinhos = array[3]
 
-                #print ("Recebido de "+ senderIP + ' -> ' + str(array) + " com roundtrip de: " + str(int(time.time())-int(timeStamp)))
                 if senderName != self.name:
                     self.updateTable(senderName, senderIP, senderName, 0, timeStamp, rtt)
                     for vizName in vizinhos:
-
-                        #print(str(dest[0]))
                         if vizName != self.name:
                             try:
                                 destino=self.table[vizName]
@@ -381,20 +377,21 @@ class AdhocRoute:
             conn, sender = tcp_r.accept() #locks until we get something
             data = json.loads(conn.recv(1024).decode())
             if(len(data) == 0):
-                conn.send(json.dumps(data).encode())
-                conn.close()
+                client_conn.send(json.dumps(data).encode())
+                client_conn.close()
             else:
                 Verb= data[0] #GET OR NEWS
                 Object= data[1] #DESTINATION
                 if Verb == "GET":
                     #Gets the request and connects to the UDP server (the router) in localhost machine
+                    client_conn = conn
                     udp_router.connect(('::1', self.port))
                     bytes_to_send = json.dumps([3, "MSG", self.name, Object, [Verb, self.name, Object]]).encode() #ADD MSG header
                     udp_router.send(bytes_to_send)
                 elif Verb == "NEWS":
                     news=data[3]
-                    conn.send(json.dumps(data).encode())
-                    conn.close()
+                    client_conn.send(json.dumps(data).encode())
+                    client_conn.close()
 
 
 if __name__ == '__main__':

@@ -340,7 +340,7 @@ class AdhocRoute:
             time.sleep(timeout/100)
             if(msg_dest in self.table):
                 fwd_s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-                fwd_s.sendto(data, ('::1', self.port))
+                fwd_s.sendto(data, (self.table[msg_dest][1], self.port))
             else:
                 tcp_sendnews = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
                 tcp_sendnews.connect(('::1', self.port))
